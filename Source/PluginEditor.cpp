@@ -1,59 +1,71 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-// Custom listener class to update sliders
-class SliderParameterListener : public juce::AudioProcessorParameter::Listener
-{
-public:
-    SliderParameterListener(juce::Slider& s) : slider(s) {}
-    void parameterValueChanged(int /*parameterIndex*/, float newValue) override
-    {
-        slider.setValue(newValue, juce::dontSendNotification);
-    }
-    void parameterGestureChanged(int /*parameterIndex*/, bool /*gestureIsStarting*/) override {}
-private:
-    juce::Slider& slider;
-};
-
+//==============================================================================
 DynamicMultiEffectAudioProcessorEditor::DynamicMultiEffectAudioProcessorEditor(DynamicMultiEffectAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p)
-{
-    gainSlider.setSliderStyle(juce::Slider::LinearVertical);
-    gainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 20);
-    gainSlider.setRange(0.0f, 10.0f);
-    gainSlider.setValue(*p.gainParam);
-    gainSlider.onValueChange = [this] { *audioProcessor.gainParam = gainSlider.getValue(); };
-    addAndMakeVisible(gainSlider);
+    : AudioProcessorEditor(&p), audioProcessor(p) {
+    addAndMakeVisible(distortionSlider);
+    distortionSlider.setRange(0.0, 10.0);
+    distortionSlider.addListener(this);
 
-    levelSlider.setSliderStyle(juce::Slider::LinearVertical);
-    levelSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 20);
-    levelSlider.setRange(0.0f, 1.0f);
-    levelSlider.setValue(*p.levelParam);
-    levelSlider.onValueChange = [this] { *audioProcessor.levelParam = levelSlider.getValue(); };
-    addAndMakeVisible(levelSlider);
+    addAndMakeVisible(delaySlider);
+    delaySlider.setRange(0.0, 1.0);
+    delaySlider.addListener(this);
 
-    gainAttachment = std::make_unique<SliderParameterListener>(gainSlider);
-    levelAttachment = std::make_unique<SliderParameterListener>(levelSlider);
-    p.gainParam->addListener(gainAttachment.get());
-    p.levelParam->addListener(levelAttachment.get());
+    addAndMakeVisible(reverbSlider);
+    reverbSlider.setRange(0.0, 1.0);
+    reverbSlider.addListener(this);
 
-    setSize(200, 300);
+    audioData.setSize(2, 1024); // Match processor buffer size
+    audioData.clear();
+
+    startTimerHz(30);
+    setSize(600, 400);
 }
 
-DynamicMultiEffectAudioProcessorEditor::~DynamicMultiEffectAudioProcessorEditor()
-{
-}
+DynamicMultiEffectAudioProcessorEditor::~DynamicMultiEffectAudioProcessorEditor() {}
 
-void DynamicMultiEffectAudioProcessorEditor::paint(juce::Graphics& g)
-{
+//==============================================================================
+void DynamicMultiEffectAudioProcessorEditor::paint(juce::Graphics& g) {
     g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
     g.setColour(juce::Colours::white);
-    g.setFont(15.0f);
-    g.drawText("Dynamic Multi-Effect", getLocalBounds(), juce::Justification::centredTop, true);
+
+    // Draw stereo waveform (left and right channels)
+    auto width = getWidth();
+    auto height = getHeight() / 2;
+    juce::Path leftWaveform, rightWaveform;
+    leftWaveform.startNewSubPath(0, height / 2);
+    rightWaveform.startNewSubPath(0, height * 1.5f);
+
+    int numSamples = audioData.getNumSamples();
+    for (int i = 0; i < numSamples; ++i) {
+        float x = juce::jmap(float(i), 0.0f, float(numSamples), 0.0f, float(width));
+        float leftY = juce::jmap(audioData.getSample(0, i), -1.0f, 1.0f, float(height), 0.0f);
+        float rightY = juce::jmap(audioData.getSample(1, i), -1.0f, 1.0f, float(height * 2), float(height));
+        leftWaveform.lineTo(x, leftY);
+        rightWaveform.lineTo(x, rightY);
+    }
+
+    g.strokePath(leftWaveform, juce::PathStrokeType(1.0f));
+    g.strokePath(rightWaveform, juce::PathStrokeType(1.0f));
 }
 
-void DynamicMultiEffectAudioProcessorEditor::resized()
-{
-    gainSlider.setBounds(40, 50, 50, 200);
-    levelSlider.setBounds(110, 50, 50, 200);
+void DynamicMultiEffectAudioProcessorEditor::resized() {
+    distortionSlider.setBounds(10, 10, 150, 20);
+    delaySlider.setBounds(10, 40, 150, 20);
+    reverbSlider.setBounds(10, 70, 150, 20);
+}
+
+void DynamicMultiEffectAudioProcessorEditor::timerCallback() {
+    audioProcessor.getAudioDataForVisualization(audioData);
+    repaint();
+}
+
+void DynamicMultiEffectAudioProcessorEditor::sliderValueChanged(juce::Slider* slider) {
+    if (slider == &distortionSlider)
+        audioProcessor.distortionGain->setValueNotifyingHost(slider->getValue() / 10.0f);
+    else if (slider == &delaySlider)
+        audioProcessor.delayTime->setValueNotifyingHost(slider->getValue());
+    else if (slider == &reverbSlider)
+        audioProcessor.reverbSize->setValueNotifyingHost(slider->getValue());
 }

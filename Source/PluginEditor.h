@@ -2,21 +2,22 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-class DynamicMultiEffectAudioProcessorEditor : public juce::AudioProcessorEditor
-{
+class DynamicMultiEffectAudioProcessorEditor : public juce::AudioProcessorEditor,
+    public juce::Timer,
+    public juce::Slider::Listener {
 public:
-    explicit DynamicMultiEffectAudioProcessorEditor(DynamicMultiEffectAudioProcessor&);
+    DynamicMultiEffectAudioProcessorEditor(DynamicMultiEffectAudioProcessor&);
     ~DynamicMultiEffectAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void timerCallback() override;
+    void sliderValueChanged(juce::Slider* slider) override;
 
 private:
     DynamicMultiEffectAudioProcessor& audioProcessor;
-    juce::Slider gainSlider;
-    juce::Slider levelSlider;
-    std::unique_ptr<juce::AudioProcessorParameter::Listener> gainAttachment;
-    std::unique_ptr<juce::AudioProcessorParameter::Listener> levelAttachment;
+    juce::Slider distortionSlider, delaySlider, reverbSlider;
+    juce::AudioBuffer<float> audioData; // Buffer for visualization
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DynamicMultiEffectAudioProcessorEditor)
 };

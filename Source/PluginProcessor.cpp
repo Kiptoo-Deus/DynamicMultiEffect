@@ -2,137 +2,93 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-
 DynamicMultiEffectAudioProcessor::DynamicMultiEffectAudioProcessor()
     : AudioProcessor(BusesProperties()
-#if ! JucePlugin_IsMidiEffect
-#if ! JucePlugin_IsSynth
-        .withInput("Input", juce::AudioChannelSet::stereo(), true)
-#endif
-        .withOutput("Output", juce::AudioChannelSet::stereo(), true)
-#endif
-    )
+        .withInput("Input", juce::AudioChannelSet::stereo())
+        .withOutput("Output", juce::AudioChannelSet::stereo()))
 {
-    gainParam = new juce::AudioParameterFloat("gain", "Gain", 0.0f, 10.0f, 1.0f);
-    levelParam = new juce::AudioParameterFloat("level", "Level", 0.0f, 1.0f, 1.0f);
-    addParameter(gainParam);
-    addParameter(levelParam);
+    addParameter(distortionGain = new juce::AudioParameterFloat("distGain", "Distortion Gain", 0.0f, 10.0f, 1.0f));
+    addParameter(delayTime = new juce::AudioParameterFloat("delayTime", "Delay Time", 0.0f, 1.0f, 0.5f));
+    addParameter(reverbSize = new juce::AudioParameterFloat("reverbSize", "Reverb Size", 0.0f, 1.0f, 0.5f));
 }
 
 DynamicMultiEffectAudioProcessor::~DynamicMultiEffectAudioProcessor() {}
 
-const juce::String DynamicMultiEffectAudioProcessor::getName() const
-{
-    return JucePlugin_Name;
+//==============================================================================
+void DynamicMultiEffectAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
+    juce::dsp::ProcessSpec spec{ sampleRate, static_cast<juce::uint32>(samplesPerBlock), 2 };
+    effectChain.prepare(spec);
+
+    // Set maximum delay to 2 seconds
+    maxDelaySamples = 2.0f * static_cast<float>(sampleRate);
+    effectChain.get<1>().setMaximumDelayInSamples(static_cast<int>(maxDelaySamples));
+
+    // Initialize visualization buffer ( 1024 samples, stereo)
+    visualizationBuffer.setSize(2, 1024);
+    visualizationBuffer.clear();
+
+    // Configure effects
+    effectChain.get<0>().setGainLinear(*distortionGain);
+    float delayInSamples = juce::jlimit<float>(0.0f, maxDelaySamples, *delayTime * static_cast<float>(sampleRate));
+    effectChain.get<1>().setDelay(delayInSamples);
+    juce::dsp::Reverb::Parameters reverbParams;
+    reverbParams.roomSize = *reverbSize;
+    effectChain.get<2>().setParameters(reverbParams);
 }
 
-bool DynamicMultiEffectAudioProcessor::acceptsMidi() const
-{
-#if JucePlugin_WantsMidiInput
-    return true;
-#else
-    return false;
-#endif
+void DynamicMultiEffectAudioProcessor::releaseResources() {
+    visualizationBuffer.setSize(0, 0); // Clear buffer
 }
 
-bool DynamicMultiEffectAudioProcessor::producesMidi() const
-{
-#if JucePlugin_ProducesMidiOutput
-    return true;
-#else
-    return false;
-#endif
-}
-
-bool DynamicMultiEffectAudioProcessor::isMidiEffect() const
-{
-#if JucePlugin_IsMidiEffect
-    return true;
-#else
-    return false;
-#endif
-}
-
-double DynamicMultiEffectAudioProcessor::getTailLengthSeconds() const
-{
-    return 0.0;
-}
-
-int DynamicMultiEffectAudioProcessor::getNumPrograms()
-{
-    return 1;
-}
-
-int DynamicMultiEffectAudioProcessor::getCurrentProgram()
-{
-    return 0;
-}
-
-void DynamicMultiEffectAudioProcessor::setCurrentProgram(int /*index*/) {}
-
-const juce::String DynamicMultiEffectAudioProcessor::getProgramName(int /*index*/)
-{
-    return {};
-}
-
-void DynamicMultiEffectAudioProcessor::changeProgramName(int /*index*/, const juce::String& /*newName*/) {}
-
-void DynamicMultiEffectAudioProcessor::prepareToPlay(double newSampleRate, int /*samplesPerBlock*/)
-{
-    sampleRate = static_cast<float>(newSampleRate);
-}
-
-void DynamicMultiEffectAudioProcessor::releaseResources() {}
-
-bool DynamicMultiEffectAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
-{
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
-        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+bool DynamicMultiEffectAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
-
+    if (layouts.getMainInputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
     return true;
 }
 
-void DynamicMultiEffectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& /*midiMessages*/)
-{
+void DynamicMultiEffectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) {
     juce::ScopedNoDenormals noDenormals;
-    auto totalNumInputChannels = getTotalNumInputChannels();
-    auto totalNumOutputChannels = getTotalNumOutputChannels();
+    juce::dsp::AudioBlock<float> block(buffer);
 
-    for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
-        buffer.clear(i, 0, buffer.getNumSamples());
+    effectChain.get<0>().setGainLinear(*distortionGain);
+    float delayInSamples = juce::jlimit<float>(0.0f, maxDelaySamples, *delayTime * static_cast<float>(getSampleRate()));
+    effectChain.get<1>().setDelay(delayInSamples);
+    juce::dsp::Reverb::Parameters reverbParams;
+    reverbParams.roomSize = *reverbSize;
+    effectChain.get<2>().setParameters(reverbParams);
 
-    float gain = *gainParam;
-    float level = *levelParam;
+    effectChain.process(juce::dsp::ProcessContextReplacing<float>(block));
 
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    // Buffer the processed audio for visualization
     {
-        auto* channelData = buffer.getWritePointer(channel);
-        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-        {
-            float input = channelData[sample] * gain;
-            channelData[sample] = juce::jlimit(-1.0f, 1.0f, input) * level;
+        juce::ScopedLock lock(bufferLock);
+        int numSamples = juce::jmin(buffer.getNumSamples(), visualizationBuffer.getNumSamples());
+        for (int channel = 0; channel < 2; ++channel) {
+            visualizationBuffer.copyFrom(channel, 0, buffer.getReadPointer(channel), numSamples);
         }
     }
 }
 
-//==============================================================================
-
-bool DynamicMultiEffectAudioProcessor::hasEditor() const
-{
-    return true;
+void DynamicMultiEffectAudioProcessor::getAudioDataForVisualization(juce::AudioBuffer<float>& destBuffer) {
+    juce::ScopedLock lock(bufferLock);
+    int numSamples = juce::jmin(visualizationBuffer.getNumSamples(), destBuffer.getNumSamples());
+    for (int channel = 0; channel < 2; ++channel) {
+        destBuffer.copyFrom(channel, 0, visualizationBuffer.getReadPointer(channel), numSamples);
+    }
 }
 
-juce::AudioProcessorEditor* DynamicMultiEffectAudioProcessor::createEditor()
-{
+//==============================================================================
+juce::AudioProcessorEditor* DynamicMultiEffectAudioProcessor::createEditor() {
     return new DynamicMultiEffectAudioProcessorEditor(*this);
 }
 
-void DynamicMultiEffectAudioProcessor::getStateInformation(juce::MemoryBlock& /*destData*/) {}
+void DynamicMultiEffectAudioProcessor::getStateInformation(juce::MemoryBlock& destData) {}
 
-void DynamicMultiEffectAudioProcessor::setStateInformation(const void* /*data*/, int /*sizeInBytes*/) {}
+void DynamicMultiEffectAudioProcessor::setStateInformation(const void* data, int sizeInBytes) {}
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
+//==============================================================================
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {
     return new DynamicMultiEffectAudioProcessor();
 }
