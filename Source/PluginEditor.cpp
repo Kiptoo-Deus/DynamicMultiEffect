@@ -1,40 +1,59 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin editor.
-
-  ==============================================================================
-*/
-
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-//==============================================================================
-DynamicMultiEffectAudioProcessorEditor::DynamicMultiEffectAudioProcessorEditor (DynamicMultiEffectAudioProcessor& p)
-    : AudioProcessorEditor (&p), audioProcessor (p)
+// Custom listener class to update sliders
+class SliderParameterListener : public juce::AudioProcessorParameter::Listener
 {
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
-    setSize (400, 300);
+public:
+    SliderParameterListener(juce::Slider& s) : slider(s) {}
+    void parameterValueChanged(int /*parameterIndex*/, float newValue) override
+    {
+        slider.setValue(newValue, juce::dontSendNotification);
+    }
+    void parameterGestureChanged(int /*parameterIndex*/, bool /*gestureIsStarting*/) override {}
+private:
+    juce::Slider& slider;
+};
+
+DynamicMultiEffectAudioProcessorEditor::DynamicMultiEffectAudioProcessorEditor(DynamicMultiEffectAudioProcessor& p)
+    : AudioProcessorEditor(&p), audioProcessor(p)
+{
+    gainSlider.setSliderStyle(juce::Slider::LinearVertical);
+    gainSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 20);
+    gainSlider.setRange(0.0f, 10.0f);
+    gainSlider.setValue(*p.gainParam);
+    gainSlider.onValueChange = [this] { *audioProcessor.gainParam = gainSlider.getValue(); };
+    addAndMakeVisible(gainSlider);
+
+    levelSlider.setSliderStyle(juce::Slider::LinearVertical);
+    levelSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 20);
+    levelSlider.setRange(0.0f, 1.0f);
+    levelSlider.setValue(*p.levelParam);
+    levelSlider.onValueChange = [this] { *audioProcessor.levelParam = levelSlider.getValue(); };
+    addAndMakeVisible(levelSlider);
+
+    gainAttachment = std::make_unique<SliderParameterListener>(gainSlider);
+    levelAttachment = std::make_unique<SliderParameterListener>(levelSlider);
+    p.gainParam->addListener(gainAttachment.get());
+    p.levelParam->addListener(levelAttachment.get());
+
+    setSize(200, 300);
 }
 
 DynamicMultiEffectAudioProcessorEditor::~DynamicMultiEffectAudioProcessorEditor()
 {
 }
 
-//==============================================================================
-void DynamicMultiEffectAudioProcessorEditor::paint (juce::Graphics& g)
+void DynamicMultiEffectAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (15.0f);
-    g.drawFittedText ("Hello World!", getLocalBounds(), juce::Justification::centred, 1);
+    g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+    g.setColour(juce::Colours::white);
+    g.setFont(15.0f);
+    g.drawText("Dynamic Multi-Effect", getLocalBounds(), juce::Justification::centredTop, true);
 }
 
 void DynamicMultiEffectAudioProcessorEditor::resized()
 {
-    // This is generally where you'll want to lay out the positions of any
-    // subcomponents in your editor..
+    gainSlider.setBounds(40, 50, 50, 200);
+    levelSlider.setBounds(110, 50, 50, 200);
 }

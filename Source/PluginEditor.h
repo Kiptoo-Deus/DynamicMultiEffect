@@ -1,33 +1,22 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin editor.
-
-  ==============================================================================
-*/
-
 #pragma once
-
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-//==============================================================================
-/**
-*/
-class DynamicMultiEffectAudioProcessorEditor  : public juce::AudioProcessorEditor
+class DynamicMultiEffectAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
-    DynamicMultiEffectAudioProcessorEditor (DynamicMultiEffectAudioProcessor&);
+    explicit DynamicMultiEffectAudioProcessorEditor(DynamicMultiEffectAudioProcessor&);
     ~DynamicMultiEffectAudioProcessorEditor() override;
 
-    //==============================================================================
-    void paint (juce::Graphics&) override;
+    void paint(juce::Graphics&) override;
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
     DynamicMultiEffectAudioProcessor& audioProcessor;
+    juce::Slider gainSlider;
+    juce::Slider levelSlider;
+    std::unique_ptr<juce::AudioProcessorParameter::Listener> gainAttachment;
+    std::unique_ptr<juce::AudioProcessorParameter::Listener> levelAttachment;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamicMultiEffectAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DynamicMultiEffectAudioProcessorEditor)
 };
